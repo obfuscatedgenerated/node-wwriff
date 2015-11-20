@@ -20,10 +20,16 @@ function Wwriff_Decoder() {
     this._packetno = 3; //first 3 packets are pre-defined
 
     this._fmt = null;
+    this._vorb = null;
+    this._info = {};
     this._found_chunks = [];
     this._current_chunk_type = null;
     this._current_chunk_rest = null;
     this._vorbis_header_written = false;
+    this._total_offset = 0;
+
+    this._last_blocksize = 0;
+    this._granpos = 0;
 
     this._little_endian = true;
     this._read_16 = function(buf, offset) {return buf.readUInt16LE(offset);}
@@ -46,7 +52,7 @@ Wwriff_Decoder.prototype.setCodebook = function(path) {
 }
 
 Wwriff_Decoder.prototype._transform = function(_chunk, encoding, done) {
-    //console.log(_chunk.length);
+    console.log(this._current_chunk_type, _chunk.length);
 
     if(this._current_chunk_rest != null) {
         var chunk = Buffer.concat([this._current_chunk_rest, _chunk]);
@@ -72,7 +78,7 @@ Wwriff_Decoder.prototype._transform = function(_chunk, encoding, done) {
             var type = chunk.toString('utf8', pos, pos + 4);
             var size = this._read_32(chunk, pos + 4);
             pos += 8;
-            if(pos + size > chunk.length) {
+            if(pos + size > chunk.length && type != "data") {
                 this._current_chunk_rest = chunk.slice(pos - 8);
                 break;
             }
@@ -87,8 +93,12 @@ Wwriff_Decoder.prototype._transform = function(_chunk, encoding, done) {
                     pos += size;
                     break;
                 case "data":
+                    console.log("pos:", pos);
+                    this._total_offset = pos;
+                    this._info.file_size = pos + size;
                     this._current_chunk_type = "data";
                     this._read_data_chunk(chunk.slice(pos));
+                    this._chunknumber++;
                     return done();
                     break;
                 default:
@@ -107,11 +117,104 @@ Wwriff_Decoder.prototype._transform = function(_chunk, encoding, done) {
 Wwriff_Decoder.prototype._read_data_chunk = function(chunk) {
     if(!this._vorbis_header_written) {
         //console.log('Writing vorbis header packets');
+        var setup_packet = this._generateOggPacket3(chunk);
+        if(setup_packet != null) {
+            this.push(this._generateOggPacket1());
+            this.push(this._generateOggPacket2());
+            this.push(setup_packet);
+            this._vorbis_header_written = true;
+        } else {
+            this._current_chunk_rest = chunk;
+            return;
+        }
+    }
 
-        this.push(this._generateOggPacket1());
-        this.push(this._generateOggPacket2());
-        this.push(this._generateOggPacket3(chunk));
-        this._vorbis_header_written = true;
+    var offset = 0;
+    var ogg_flush = false;
+    if(this._packetno == 3) { //first audio packet after header
+        offset = this._vorb.first_audio_packet_offset;
+    }
+    var ogg_end = 0;
+
+    var prev_blockflag = 0;
+    var next_blockflag = 0;
+    var is = new BitReadStream(chunk);
+
+    while(true) {
+        //console.log("offset:", offset , "offset 2:", this._total_offset + offset);
+        var packet = new Packet(chunk, offset, this._little_endian, true);
+        if(packet.next_offset() + 2 > chunk.length) {
+            this._total_offset += offset;
+            this._current_chunk_rest = chunk.slice(offset);
+            break;
+        }
+        var next_packet = new Packet(chunk, packet.next_offset(), this._little_endian, true);
+        if(next_packet.next_offset() + 2 > chunk.length) {
+            ogg_flush = true;
+        }
+
+        //console.log(packet.next_offset() + 2, chunk.length);
+
+        var buffer = new StreamBuffer();
+        var os = new Bitstream();
+        os.pipe(buffer);
+
+        is.seekToByte(packet.offset());
+
+        os.writeUnsignedLE(0, 1); //packet type
+        var mode_number = is.readBits(this._info.mode_bits);
+        os.writeUnsignedLE(mode_number, this._info.mode_bits);
+
+        var remainder = is.readBits(8 - this._info.mode_bits);
+        if(this._info.mode_blockflag[mode_number]) {
+            next_blockflag = false;
+            if(this._total_offset + next_packet.next_offset() + next_packet.header_size() <= this._info.file_size) {
+                if(next_packet.size() > 0) {
+                    is.seekToByte(next_packet.offset());
+                    var next_mode_number = is.readBits(this._info.mode_bits);
+                    next_blockflag = this._info.mode_blockflag[next_mode_number];
+                }
+            }
+
+            os.writeUnsignedLE(prev_blockflag, 1);
+            os.writeUnsignedLE(next_blockflag, 1);
+        }
+
+        //console.log(this._packetno, " ", mode_number, remainder, next_mode_number, next_blockflag/1, prev_blockflag/1);
+
+        prev_blockflag = this._info.mode_blockflag[mode_number];
+        os.writeUnsignedLE(remainder, 8 - this._info.mode_bits);
+
+        //buffer.appendBuffer(chunk.slice(packet.offset() + 1, packet.next_offset()));
+        for(var i = 1; i < packet.size(); i++) {
+            var v = chunk.readUInt8(packet.offset() + i);
+            os.writeUnsignedLE(v, 8);
+        }
+
+        os.align();
+        os.end();
+
+        var bs = (this._info.mode_blockflag[mode_number] == 0) ? this._vorb.blocksize0_pow : this._vorb.blocksize1_pow;
+        if(this._last_blocksize) {
+            this._granpos += Math.floor((this._last_blocksize + bs) / 4);
+        }
+        this._last_blocksize = bs;
+
+        //console.log(bs, this._granpos);
+
+        var ogg_p = new ogg_packet();
+        var packet_buffer = buffer.getBuffer();
+        ogg_p.packet = packet_buffer;
+        ogg_p.bytes = packet_buffer.length;
+        ogg_p.b_o_s = 0;
+        ogg_p.e_o_s = ogg_end;
+        ogg_p.granulepos = 0; //this._granpos;
+        ogg_p.packetno = this._packetno;
+        ogg_p.flush = ogg_flush;
+        this.push(ogg_p);
+
+        offset = packet.next_offset();
+        this._packetno++;
     }
 }
 
@@ -187,25 +290,31 @@ Wwriff_Decoder.prototype._generateOggPacket2 = function() { //comment packet
     buffer.writeUInt8(1, 4 + vendor_length + 4); //framing
 
     var ret = new ogg_packet();
-    var packet_buffer = Buffer.concat([generateVorbisPacketHeader(1), buffer]);
+    var packet_buffer = Buffer.concat([generateVorbisPacketHeader(3), buffer]);
     ret.packet = packet_buffer;
     ret.bytes = packet_buffer.length;
-    ret.b_o_s = 1;
+    ret.b_o_s = 0;
     ret.e_o_s = 0;
     ret.granulepos = 0;
     ret.packetno = 1;
-    //ret.flush = true;
+    ret.flush = false;
     return ret;
 }
 
 Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
-    var setup_packet = new Packet(buf, 0, this._little_endian, true);
+    //console.log(this._vorb.setup_packet_offset, this._vorb.first_audio_packet_offset);
 
-    var packet_buffer = new StreamBuffer();
+    if(buf.length < this._vorb.setup_packet_offset) return null;
+
+    var setup_packet = new Packet(buf, this._vorb.setup_packet_offset, this._little_endian, true);
+
+    if(buf.length < setup_packet.next_offset()) return null;
+
+    var buffer = new StreamBuffer();
     var os = new Bitstream();
-    os.pipe(packet_buffer);
+    os.pipe(buffer);
 
-    console.log(setup_packet.offset(), buf.length);
+    //console.log(setup_packet.offset(), buf.length);
 
     var is = new BitReadStream(buf);
     is.seekBytes(setup_packet.offset());
@@ -221,9 +330,10 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
 
         //console.log("Codebook " + i + " = " + codebook_id);
 
-        this._codebook.rebuild(codebook_id);
+        this._codebook.rebuild(codebook_id, os);
     }
 
+    //console.log("t:", os._total);
     os.writeUnsignedLE(0, 6); //time_count_less1 placeholder
     os.writeUnsignedLE(0, 16); //dummy_time_value
 
@@ -260,7 +370,7 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
             floor1_class_dimensions_list.push(class_dimensions_less1 + 1);
 
             var class_subclasses = is.readBits(2);
-            os.writeUnsignedLE(class_subclasses);
+            os.writeUnsignedLE(class_subclasses, 2);
 
             if(0 != class_subclasses) {
                 var masterbook = is.readBits(8);
@@ -271,7 +381,7 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
 
             for(var k = 0; k < (1 << class_subclasses); k++) {
                 var subclass_book_plus1 = is.readBits(8);
-                os.writeUnsignedLE(subclass_book_plus1);
+                os.writeUnsignedLE(subclass_book_plus1, 8);
 
                 if(subclass_book_plus1 - 1 >= 0 && subclass_book_plus1 - 1 >= codebook_count) {
                     throw new Error("Invalid floor1 subclass book");
@@ -296,6 +406,9 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
 
 
     }
+
+    console.log("rebuild floors", is.getTotalReadBits(), (is.getTotalReadBits() + 7) / 8);
+    //console.log("t:", os._total);
 
     //residue count
     var residue_count = is.readBits(6) + 1;
@@ -353,9 +466,14 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
         }
     }
 
+    console.log("rebuild residues", is.getTotalReadBits(), (is.getTotalReadBits() + 7) / 8);
+    //console.log("t:", os._total);
+
     //mapping count
     var mapping_count = is.readBits(6) + 1;
     os.writeUnsignedLE(mapping_count - 1, 6);
+
+    console.log("mapping count:", mapping_count);
 
     for(var i = 0; i < mapping_count; i++) {
         os.writeUnsignedLE(0, 16); //mapping_type is always 0
@@ -363,7 +481,7 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
         var submaps_flag = is.readBits(1);
         os.writeUnsignedLE(submaps_flag, 1);
 
-        var submaps = 0;
+        var submaps = 1;
         if(submaps_flag) {
             var submaps_less1 = is.readBits(4);
             submaps = submaps_less1 + 1;
@@ -409,7 +527,7 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
             os.writeUnsignedLE(is.readBits(8), 8);
 
             var floor_number = is.readBits(8);
-            os.writeUnsignedLE(floor_number);
+            os.writeUnsignedLE(floor_number, 8);
             if(floor_number >= floor_count) throw new Error('Invalid floor mapping');
 
             var residue_number = is.readBits(8);
@@ -418,12 +536,18 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
         }
     }
 
+    console.log("mapping count", is.getTotalReadBits(), (is.getTotalReadBits() + 7) / 8);
+
+    //console.log("t:", os._total);
+
     //mode count
     var mode_count = is.readBits(6) + 1;
     os.writeUnsignedLE(mode_count - 1, 6);
 
     var mode_blockflag = [];
     var mode_bits = ilog(mode_count - 1);
+
+    this._info.mode_bits = mode_bits;
 
     for(var i = 0; i < mode_count; i++) {
         var block_flag = is.readBits(1);
@@ -439,19 +563,23 @@ Wwriff_Decoder.prototype._generateOggPacket3 = function(buf) { //setup packet
         if(mapping > mapping_count) throw new Error('Invalid mode mapping');
     }
 
+    this._info.mode_blockflag = mode_blockflag;
+
     os.writeUnsignedLE(1, 1); //framing;
+
+    //console.log("t:", os._total);
 
     os.align();
     os.end();
 
-    console.log(is.getTotalReadBits(), (is.getTotalReadBits() + 7) / 8, setup_packet.size());
-    if((is.getTotalReadBits() + 7) / 8 != setup_packet.size()) throw new Error("Didn't read exactly setup packet");
+    //console.log(is.getTotalReadBits(), (is.getTotalReadBits() + 7) / 8, setup_packet.size());
+    if(Math.floor((is.getTotalReadBits() + 7) / 8) != setup_packet.size()) throw new Error("Didn't read exactly setup packet");
 
     var ret = new ogg_packet();
-    var packet_buffer = Buffer.concat([generateVorbisPacketHeader(1), packet_buffer.getBuffer()]);
+    var packet_buffer = Buffer.concat([generateVorbisPacketHeader(5), buffer.getBuffer()]);
     ret.packet = packet_buffer;
     ret.bytes = packet_buffer.length;
-    ret.b_o_s = 1;
+    ret.b_o_s = 0;
     ret.e_o_s = 0;
     ret.granulepos = 0;
     ret.packetno = 2;

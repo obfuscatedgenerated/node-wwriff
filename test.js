@@ -15,9 +15,9 @@ var encoder = new ogg.Encoder();
 var outstream = fs.createWriteStream(process.argv[3]);
 
 instream.pipe(decoder);
-decoder.on('data', function(d) {
+/*decoder.on('data', function(d) {
     console.log(d);
-});
+});*/
 decoder.pipe(encoder.stream());
 encoder.pipe(outstream);
 
