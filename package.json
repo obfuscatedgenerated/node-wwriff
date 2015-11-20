@@ -1,6 +1,6 @@
 {
   "name": "node-wwriff",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Streaming decoder for Wwise audio files",
   "main": "index.js",
   "scripts": {
