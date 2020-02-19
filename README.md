@@ -25,8 +25,8 @@ See the `examples` directory for some example code.
 ## API
 
 ### Decoder class
-The `Decoder` class is a `Writable` and `Readable` stream that accepts an wem file written to it and emits `ogg_packet` instances. These need to be piped into and `ogg.Encoder`.
+The `Decoder` class is a `Writable` and `Readable` stream that accepts a *wem* file written to it and emits `ogg_packet` instances. These need to be piped into an `ogg.Encoder`.
 
 ## Notes
 
-This project is by no means a complete port of `ww2ogg` and lacks a lot of features (PRs welcome 😉), especially support for inline codebooks. It was also only tested with audio files from *The Witcher 3: Wild Hunt* and is probably incompatible with a lot of other files.
+This project is by no means a complete port of `ww2ogg` and lacks a lot of features, especially support for inline codebooks (PRs welcome 😉). It was also only tested with audio files from *The Witcher 3: Wild Hunt* and is probably incompatible with a lot of other files.
