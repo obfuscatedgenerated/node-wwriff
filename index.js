@@ -1,3 +1,5 @@
-var Wwriff_Decoder = require('./lib/decoder.js');
+const Decoder = require('./lib/decoder');
 
-module.exports.Decoder = Wwriff_Decoder;
+module.exports = {
+    Decoder,
+};

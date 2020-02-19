@@ -7,13 +7,13 @@ A port of [ww2ogg](https://github.com/hcs64/ww2ogg). Provides a streaming decode
     npm install node-wwriff
 
 ## Example
-```
-var fs = require('fs');
-var ogg = require('ogg');
-var Wwriff_Decoder = require('node-wwriff').Decoder;
+```javascript
+const fs = require('fs');
+const ogg = require('ogg');
+const { Decoder } = require('node-wwriff');
 
-var encoder = new ogg.Encoder();
-var decoder = new Wwriff_Decoder();
+const encoder = new ogg.Encoder();
+const decoder = new Decoder();
 decoder.setCodebook("path_to_external_codebooks.bin");
 
 fs.createReadStream("file.wem").pipe(decoder).pipe(encoder.stream());
@@ -29,8 +29,4 @@ The `Decoder` class is a `Writable` and `Readable` stream that accepts an wem fi
 
 ## Notes
 
-This project is by no means a complete port of `ww2ogg` and lacks a lot of features, especially support for inline codebooks. It was also only tested with audio files from *The Witcher 3: Wild Hunt* and is probably incompatible with most other files.
-
-The code quality is also very low and is in need of refractoring.
-
-At the time of writing this (Nov 2015) `npm install ogg` will not work, because Nate hasn't updated it in npm. The version on github works thought, so just doing `npm install git+https://github.com/TooTallNate/node-ogg.git` and install it directly from there does work.
+This project is by no means a complete port of `ww2ogg` and lacks a lot of features (PRs welcome 😉), especially support for inline codebooks. It was also only tested with audio files from *The Witcher 3: Wild Hunt* and is probably incompatible with a lot of other files.

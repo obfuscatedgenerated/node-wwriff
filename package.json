@@ -1,6 +1,6 @@
 {
   "name": "node-wwriff",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Streaming decoder for Wwise audio files",
   "main": "index.js",
   "scripts": {
@@ -13,11 +13,10 @@
     "url": "https://github.com/jangxx/node-wwriff.git"
   },
   "directories": {
-      "lib": "./lib",
-      "examples": "./examples"
+    "lib": "./lib",
+    "examples": "./examples"
   },
   "dependencies": {
-    "bitstream": "git+https://github.com/kkaefer/node-bitstream.git",
     "ogg-packet": "^1.0.0"
   }
 }
