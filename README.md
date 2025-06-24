@@ -6,7 +6,7 @@ node-wwriff
 A port of [ww2ogg](https://github.com/hcs64/ww2ogg). Provides a streaming decoder for Audiokinetik Wwise files to ogg packets.
 
 ## Installation
-    npm install node-wwriff
+    npm install https://github.com/obfuscatedgenerated/node-wwriff.git
 
 ## Example
 ```javascript
