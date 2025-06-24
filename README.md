@@ -1,6 +1,8 @@
 node-wwriff
 ===========
 
+(fork fixes dependencies to build properly)
+
 A port of [ww2ogg](https://github.com/hcs64/ww2ogg). Provides a streaming decoder for Audiokinetik Wwise files to ogg packets.
 
 ## Installation
