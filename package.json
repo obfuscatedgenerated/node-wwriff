@@ -17,6 +17,6 @@
     "examples": "./examples"
   },
   "dependencies": {
-    "ogg-packet": "^1.0.0"
+    "ogg-packet": "github:obfuscatedgenerated/node-ogg-packet"
   }
 }
